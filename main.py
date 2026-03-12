@@ -13,8 +13,8 @@ ytmusic = YTMusic()
 
 app = FastAPI(
     title="Krishan Music API",
-    description="🎵 High performance music API for bots and websites\nMade with ❤️ by Krishan",
-    version="3.0"
+    description="🎧 High performance music API for Telegram Bots & Websites\nMade with ❤️ by Krishan",
+    version="4.0"
 )
 
 # ----------------------------
@@ -52,14 +52,15 @@ def check_rate_limit(ip):
 
 @app.get("/")
 @app.head("/")
+
 def home():
 
     return {
         "status": "online",
         "api": "Krishan Music API",
-        "version": "3.0",
+        "version": "4.0",
         "developer": "Krishan",
-        "message": "Welcome to Krishan Music API 🎧",
+        "message": "Welcome to Krishan Music API 🎵",
         "endpoints": {
             "search": "/search?query=song name",
             "stream": "/stream/{video_id}",
@@ -70,12 +71,18 @@ def home():
 
 
 # ----------------------------
-# PING
+# HEALTH CHECK
 # ----------------------------
 
 @app.get("/ping")
+
 def ping():
-    return {"status": "success", "message": "API alive", "developer": "Krishan"}
+
+    return {
+        "status": "success",
+        "message": "API Alive",
+        "developer": "Krishan"
+    }
 
 
 # ----------------------------
@@ -83,6 +90,7 @@ def ping():
 # ----------------------------
 
 @lru_cache(maxsize=200)
+
 def cached_search(query):
 
     return ytmusic.search(query, filter="songs")
@@ -115,7 +123,7 @@ def search_music(request: Request, query: str = Query(..., min_length=1)):
 
 
 # ----------------------------
-# STREAM (yt-dlp)
+# STREAM AUDIO (yt-dlp)
 # ----------------------------
 
 @app.get("/stream/{video_id}")
@@ -124,40 +132,59 @@ def stream_audio(request: Request, video_id: str):
 
     check_rate_limit(request.client.host)
 
-    try:
+    url = f"https://www.youtube.com/watch?v={video_id}"
 
-        url = f"https://music.youtube.com/watch?v={video_id}"
+    ydl_opts = {
 
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "quiet": True,
-            "nocheckcertificate": True,
-            "noplaylist": True,
-            "extract_flat": False
+        "format": "bestaudio/best",
+        "quiet": True,
+        "nocheckcertificate": True,
+        "noplaylist": True,
+        "skip_download": True,
+
+        # bypass bot detection
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android"]
+            }
+        },
+
+        "http_headers": {
+            "User-Agent": "com.google.android.youtube/17.31.35 (Linux; Android 11)",
+            "X-YouTube-Client-Name": "3",
+            "X-YouTube-Client-Version": "17.31.35"
         }
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    }
 
-            info = ydl.extract_info(url, download=False)
+    for attempt in range(3):
 
-            audio_url = info["url"]
+        try:
 
-        return {
-            "status": "success",
-            "developer": "Krishan",
-            "stream_url": audio_url
-        }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
 
-    except Exception as e:
+                info = ydl.extract_info(url, download=False)
 
-        raise HTTPException(
-            status_code=500,
-            detail=f"Stream extraction failed: {str(e)}"
-        )
+                audio_url = info["url"]
+
+                return {
+                    "status": "success",
+                    "developer": "Krishan",
+                    "stream_url": audio_url
+                }
+
+        except Exception as e:
+
+            time.sleep(2)
+
+    raise HTTPException(
+        status_code=500,
+        detail="Stream extraction failed"
+    )
 
 
 # ----------------------------
-# SUGGESTIONS
+# SONG SUGGESTIONS
 # ----------------------------
 
 @app.get("/suggestions/{video_id}")
