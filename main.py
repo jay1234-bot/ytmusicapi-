@@ -1,25 +1,21 @@
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
+from pytube import YouTube
 from functools import lru_cache
-import yt_dlp
 import time
-
-# ----------------------------
-# INIT
-# ----------------------------
 
 ytmusic = YTMusic()
 
 app = FastAPI(
     title="Krishan Music API",
-    description="🎧 High performance music API for Telegram Bots & Websites\nMade with ❤️ by Krishan",
-    version="4.0"
+    description="🎧 Music API for Telegram Bots & Websites\nMade with ❤️ by Krishan",
+    version="5.0"
 )
 
-# ----------------------------
+# ---------------------------
 # CORS
-# ----------------------------
+# ---------------------------
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,9 +25,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ----------------------------
+# ---------------------------
 # RATE LIMIT
-# ----------------------------
+# ---------------------------
 
 rate_limit = {}
 
@@ -46,59 +42,39 @@ def check_rate_limit(ip):
     rate_limit[ip] = now
 
 
-# ----------------------------
+# ---------------------------
 # HOME
-# ----------------------------
+# ---------------------------
 
 @app.get("/")
-@app.head("/")
-
 def home():
 
     return {
         "status": "online",
         "api": "Krishan Music API",
-        "version": "4.0",
+        "version": "5.0",
         "developer": "Krishan",
         "message": "Welcome to Krishan Music API 🎵",
         "endpoints": {
-            "search": "/search?query=song name",
-            "stream": "/stream/{video_id}",
-            "lyrics": "/lyrics/{video_id}",
-            "suggestions": "/suggestions/{video_id}"
+            "search": "/search?query=song",
+            "stream": "/stream/{video_id}"
         }
     }
 
 
-# ----------------------------
-# HEALTH CHECK
-# ----------------------------
-
-@app.get("/ping")
-
-def ping():
-
-    return {
-        "status": "success",
-        "message": "API Alive",
-        "developer": "Krishan"
-    }
-
-
-# ----------------------------
+# ---------------------------
 # SEARCH CACHE
-# ----------------------------
+# ---------------------------
 
 @lru_cache(maxsize=200)
-
 def cached_search(query):
 
     return ytmusic.search(query, filter="songs")
 
 
-# ----------------------------
+# ---------------------------
 # SEARCH
-# ----------------------------
+# ---------------------------
 
 @app.get("/search")
 
@@ -122,9 +98,9 @@ def search_music(request: Request, query: str = Query(..., min_length=1)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ----------------------------
-# STREAM AUDIO (yt-dlp)
-# ----------------------------
+# ---------------------------
+# STREAM USING PYTUBE
+# ---------------------------
 
 @app.get("/stream/{video_id}")
 
@@ -134,114 +110,34 @@ def stream_audio(request: Request, video_id: str):
 
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    ydl_opts = {
-
-        "format": "bestaudio/best",
-        "quiet": True,
-        "nocheckcertificate": True,
-        "noplaylist": True,
-        "skip_download": True,
-
-        # bypass bot detection
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android"]
-            }
-        },
-
-        "http_headers": {
-            "User-Agent": "com.google.android.youtube/17.31.35 (Linux; Android 11)",
-            "X-YouTube-Client-Name": "3",
-            "X-YouTube-Client-Version": "17.31.35"
-        }
-
-    }
-
-    for attempt in range(3):
-
-        try:
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-
-                info = ydl.extract_info(url, download=False)
-
-                audio_url = info["url"]
-
-                return {
-                    "status": "success",
-                    "developer": "Krishan",
-                    "stream_url": audio_url
-                }
-
-        except Exception as e:
-
-            time.sleep(2)
-
-    raise HTTPException(
-        status_code=500,
-        detail="Stream extraction failed"
-    )
-
-
-# ----------------------------
-# SONG SUGGESTIONS
-# ----------------------------
-
-@app.get("/suggestions/{video_id}")
-
-def get_suggestions(request: Request, video_id: str):
-
-    check_rate_limit(request.client.host)
-
     try:
 
-        data = ytmusic.get_watch_playlist(videoId=video_id, limit=15)
+        yt = YouTube(url)
+
+        stream = (
+            yt.streams
+            .filter(only_audio=True)
+            .order_by("abr")
+            .desc()
+            .first()
+        )
+
+        if not stream:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Audio stream not found"
+            )
 
         return {
             "status": "success",
             "developer": "Krishan",
-            "data": data["tracks"]
+            "stream_url": stream.url
         }
 
     except Exception as e:
 
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ----------------------------
-# LYRICS
-# ----------------------------
-
-@app.get("/lyrics/{video_id}")
-
-def get_lyrics(request: Request, video_id: str):
-
-    check_rate_limit(request.client.host)
-
-    try:
-
-        watch_data = ytmusic.get_watch_playlist(videoId=video_id)
-
-        lyrics_id = watch_data.get("lyrics")
-
-        if not lyrics_id:
-
-            return {
-                "status": "error",
-                "message": "Lyrics not available"
-            }
-
-        lyrics_data = ytmusic.get_lyrics(browseId=lyrics_id)
-
-        return {
-            "status": "success",
-            "developer": "Krishan",
-            "lyrics": lyrics_data["lyrics"]
-        }
-
-    except Exception:
-
-        return {
-            "status": "error",
-            "message": "Lyrics fetch failed"
-        }
+        raise HTTPException(
+            status_code=500,
+            detail=f"Stream failed: {str(e)}"
+        )
